@@ -1,0 +1,92 @@
+---
+
+- name: Configure a (AMI-based) Scylla cluster for testing.
+  hosts: server
+  gather_facts: no
+  strategy: free
+  tasks:
+    - name: Install interactive utilities.
+      ansible.builtin.include_tasks: install_utils.yml
+    - name: Wait for AMI setup to succeed (signalled by /etc/scylla/machine_image_configured being created).
+      ansible.builtin.wait_for:
+        path: /etc/scylla/machine_image_configured
+        timeout: 600
+    - name: Run scylla_io_setup if /etc/scylla.d/io_properties is absent or incomplete.
+      ansible.builtin.shell:
+        cmd: grep -q read_iops /etc/scylla.d/io_properties.yaml || scylla_io_setup
+      become: yes
+    - name: Fix up cluster name in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: 'cluster_name:'
+        line: 'cluster_name: the_cluster'
+      become: yes
+    - name: Fix up seed address in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^(.*)seeds:'
+        line: '\1seeds: {{seed}}'
+        backrefs: yes
+      become: yes
+    - name: Fix up listen_address in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^listen_address:'
+        line: 'listen_address: {{private_ip}}'
+      become: yes
+    - name: Fix up rpc_address in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^rpc_address:'
+        line: 'rpc_address: {{private_ip}}'
+      become: yes
+    - name: Set compaction_static_shares in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^compaction_static_shares:'
+        line: 'compaction_static_shares: 100'
+      become: yes
+    - name: Set infinite write timeout in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^write_request_timeout_in_ms:'
+        line: 'write_request_timeout_in_ms: 999999999'
+      become: yes
+    - name: Set infinite read timeout in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^read_request_timeout_in_ms:'
+        line: 'read_request_timeout_in_ms: 999999999'
+      become: yes
+    - name: Set shorter ring delay in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^ring_delay_ms:'
+        line: 'ring_delay_ms: 3000'
+      become: yes
+    - name: Disable waiting for gossip on the seed node.
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: 'ring_delay_ms:'
+        line: 'ring_delay_ms: 1'
+      become: yes
+      when: private_ip == seed
+    - name: Disable waiting for gossip on the seed node.
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: 'skip_wait_for_gossip_to_settle:'
+        line: 'skip_wait_for_gossip_to_settle: 0'
+      become: yes
+      when: private_ip == seed
+    - name: Set short timeout for killing the scylla process.
+      community.general.ini_file:
+        path: /usr/lib/systemd/system/scylla-server.service
+        option: TimeoutStopSec
+        value: "0"
+        no_extra_spaces: yes
+        section: Service  
+      become: yes
+    - name: Reload the Scylla systemd unit.
+      ansible.builtin.systemd:
+        daemon-reload: yes
+      become: yes

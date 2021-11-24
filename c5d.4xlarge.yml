@@ -1,0 +1,5 @@
+server_count: 3
+server_instance_type: c5d.4xlarge
+monitoring_instance_type: c5.large
+client_instance_type: c5.4xlarge
+client_count: 2

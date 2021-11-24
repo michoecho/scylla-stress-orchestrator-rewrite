@@ -1,0 +1,10 @@
+subnet: subnet-720e2138
+vpc: vpc-f6f11f9f
+region: us-east-2
+availability_zone: us-east-2c
+server_ami: ami-05edd7c29fb493043
+server_user: ubuntu
+monitoring_ami: ami-00399ec92321828f5
+monitoring_user: ubuntu
+client_ami: ami-00399ec92321828f5
+client_user: ubuntu

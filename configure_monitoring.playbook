@@ -1,0 +1,71 @@
+---
+- name: Configure prometheus.
+  hosts: prometheus
+  gather_facts: no
+  strategy: free
+  vars:
+    - cluster: cluster1
+    - dc: dc1
+    - version: 3.8.3
+  tasks:
+    - name: Get the remote user name.
+      ansible.builtin.setup:
+        filter: 'ansible_env'
+    - name: Install interactive utilities.
+      ansible.builtin.include_tasks: install_utils.yml
+    - name: Form a list of private ips for prometheus config files.
+      set_fact:
+        server_private_ips: "{{groups['server'] | map('extract', hostvars) | map(attribute='private_ip') | list}}"
+    - name: Wait for cloud-init.
+      ansible.builtin.command:
+        cmd: cloud-init status --wait
+    - name: Install docker.
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        cache_valid_time: 86400
+      become: yes
+    - name: Enable docker.
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+    - name: Add user to docker group.
+      ansible.builtin.user:
+        name: '{{ansible_facts["env"]["USER"]}}'
+        groups: docker
+        append: yes
+      become: yes
+    - name: Download scylla-monitoring.
+      ansible.builtin.get_url:
+        url: 'https://github.com/scylladb/scylla-monitoring/archive/refs/tags/scylla-monitoring-{{version}}.tar.gz'
+        dest: .
+    - name: Unpack scylla-monitoring.
+      ansible.builtin.unarchive:
+        src: 'scylla-monitoring-scylla-monitoring-{{version}}.tar.gz'
+        dest: .
+        creates: scylla-monitoring-scylla-monitoring-{{version}}
+        remote_src: yes
+    - name: Place scylla_servers.yml.
+      ansible.builtin.template:
+        src: scylla_server.yml.j2
+        dest: scylla-monitoring-scylla-monitoring-{{version}}/prometheus/scylla_servers.yml
+    - name: Place node_exporter_servers.yml.
+      ansible.builtin.template:
+        src: node_exporter.yml.j2
+        dest: scylla-monitoring-scylla-monitoring-{{version}}/prometheus/node_exporter_servers.yml
+    - name: Place prometheus.yml
+      ansible.builtin.copy:
+        src: prometheus.yml
+        dest: scylla-monitoring-scylla-monitoring-{{version}}/prometheus/prometheus.yml
+- name: Reset connection to prometheus
+  hosts: prometheus
+  gather_facts: no
+  strategy: free
+# A hack to work around a bug in Ansible <2.11
+  vars:
+    - ansible_ssh_extra_args: -o ControlPersist=10m -o controlpath=~/.ssh/cm-%r@%h:%p -o ControlPath=/
+  tasks:
+    - name: Reset ssh connection to allow future commands to execute in the "docker" group.
+      ansible.builtin.meta: reset_connection

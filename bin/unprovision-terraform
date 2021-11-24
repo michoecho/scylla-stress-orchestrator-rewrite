@@ -1,0 +1,13 @@
+#!/bin/python3
+import sys
+import yaml
+from sso import terraform
+
+if len(sys.argv) != 3:
+	raise Exception("provision-terraform TERRAFORM_PLAN PROFILE_NAME")
+
+terraform_plan = sys.argv[1]
+profile_name = sys.argv[2]
+
+terraform.destroy(terraform_plan, profile_name)
+

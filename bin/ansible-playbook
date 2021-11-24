@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if ! test -f "$1/ssh_config"; then
+    echo "File $1/ssh_config does not exist"
+    exit 1
+fi
+
+export ANSIBLE_SSH_ARGS="-C -F $1/ssh_config"
+
+ansible-playbook -i "$1/inventory" "${@:2}"

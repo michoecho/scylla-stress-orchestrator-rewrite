@@ -1,0 +1,16 @@
+---
+- name: Install benchmarking utilities.
+  ansible.builtin.apt:
+    cache_valid_time: 86400
+    name:
+    - htop
+    - fish
+    - fio
+    - iperf3
+    - netperf
+  become: yes
+- name: Install perf.
+  ansible.builtin.script:
+    cmd: ./setup_perf.sh
+    executable: /bin/bash
+    creates: FlameGraph

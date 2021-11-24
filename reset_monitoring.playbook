@@ -1,0 +1,15 @@
+- name: Reset scylla-metrics.
+  hosts: prometheus
+  gather_facts: no
+  tasks:
+    - name: Kill scylla-monitoring.
+      ansible.builtin.command:
+        chdir: scylla-monitoring-scylla-monitoring-3.8.3
+        cmd: ./kill-all.sh
+    - name: Remove scylla-monitoring data.
+      ansible.builtin.command:
+        cmd: rm -rf data
+    - name: Start scylla-monitoring.
+      ansible.builtin.command:
+        chdir: scylla-monitoring-scylla-monitoring-3.8.3
+        cmd: ./start-all.sh -d ../data -v 4.5 -b --web.enable-admin-api
