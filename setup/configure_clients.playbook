@@ -1,0 +1,35 @@
+---
+
+- name: Configure clients.
+  hosts: client
+  gather_facts: no
+  strategy: free
+  vars:
+    - cassandra_version: 4.0.1
+  tasks:
+    - name: Install interactive utilities.
+      ansible.builtin.include_tasks: install_utils.yml
+    - name: Add scylla apt key.
+      ansible.builtin.apt_key:
+        keyserver: keyserver.ubuntu.com
+        id: 5e08fbd8b5d6ec9c
+      become: yes
+    - name: Add scylla apt repository.
+      ansible.builtin.apt_repository:
+        repo: deb  [arch=amd64] http://downloads.scylladb.com/downloads/scylla/deb/debian-ubuntu/scylladb-4.5 stable main
+        filename: scylla-4.5
+      become: yes
+    - name: Install scylla-tools
+      ansible.builtin.apt:
+        name: scylla-tools
+      become: yes
+    - name: Download cassandra.
+      ansible.builtin.get_url:
+        url: 'https://mirrors.netix.net/apache/cassandra/{{cassandra_version}}/apache-cassandra-{{cassandra_version}}-bin.tar.gz'
+        dest: .
+    - name: Unpack cassandra.
+      ansible.builtin.unarchive:
+        src: apache-cassandra-4.0.1-bin.tar.gz
+        dest: .
+        creates: apache-cassandra-4.0.1
+        remote_src: yes

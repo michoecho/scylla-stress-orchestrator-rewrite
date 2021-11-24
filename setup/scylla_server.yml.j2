@@ -1,0 +1,9 @@
+- targets:
+{% for ip in server_private_ips %}
+    - {{ip}}
+{% endfor %}
+  labels:
+    cluster: {{cluster}}
+    dc: {{dc}}
+
+ 

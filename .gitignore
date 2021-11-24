@@ -1,0 +1,6 @@
+**/credentials.yml
+trials
+key
+key.pub
+**/.terraform*
+**/__pycache__
