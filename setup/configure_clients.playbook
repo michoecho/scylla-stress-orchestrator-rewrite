@@ -5,8 +5,15 @@
   gather_facts: no
   strategy: free
   vars:
-    - cassandra_version: 4.0.1
+    - cassandra_version: 4.0.3
   tasks:
+    - name: Wait for cloud-init.
+      ansible.builtin.command:
+        cmd: cloud-init status --wait
+    - name: Wait for any possibly running unattended upgrade to finish
+      ansible.builtin.command:
+        cmd: systemd-run --property="After=apt-daily.service apt-daily-upgrade.service" --wait /bin/true
+      become: yes
     - name: Install interactive utilities.
       ansible.builtin.include_tasks: install_utils.yml
     - name: Add scylla apt key.
@@ -18,10 +25,17 @@
       ansible.builtin.apt_repository:
         repo: deb  [arch=amd64] http://downloads.scylladb.com/downloads/scylla/deb/debian-ubuntu/scylladb-4.5 stable main
         filename: scylla-4.5
+        update-cache: no
       become: yes
     - name: Install scylla-tools
       ansible.builtin.apt:
         name: scylla-tools
+        update-cache: yes
+      become: yes
+    - name: Install cargo
+      ansible.builtin.apt:
+        name: cargo
+        update-cache: yes
       become: yes
     - name: Download cassandra.
       ansible.builtin.get_url:
@@ -29,7 +43,7 @@
         dest: .
     - name: Unpack cassandra.
       ansible.builtin.unarchive:
-        src: apache-cassandra-4.0.1-bin.tar.gz
+        src: 'apache-cassandra-{{cassandra_version}}-bin.tar.gz'
         dest: .
-        creates: apache-cassandra-4.0.1
+        creates: 'apache-cassandra-{{cassandra_version}}'
         remote_src: yes

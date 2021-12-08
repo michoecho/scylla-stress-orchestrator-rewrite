@@ -21,7 +21,11 @@ async def main(deployment_name, config_yaml):
     cs = config.get('cs_path', 'cassandra-stress')
     replication_factor = config.get('replication_factor', 3)
 
-    num_rows = int(config['target_dataset_size_gb'] * 1024 * 1024 * 1024 / CS_DEFAULT_ROW_SIZE)
+    num_cpus = deployment.get_num_cpus()
+
+    dataset_size = {}
+    dataset_size['cache'] = int(config['target_cache_dataset_size_gb'] * num_cpus * 1024 * 1024 * 1024 / CS_DEFAULT_ROW_SIZE)
+    dataset_size['disk'] = int(config['target_disk_dataset_size_gb'] * num_cpus * 1024 * 1024 * 1024 / CS_DEFAULT_ROW_SIZE)
 
     datetime_now_string = datetime.now().replace(microsecond=0).isoformat().replace(":", "-")
     trial_dir = "trials/{}/{}".format(deployment_name, datetime_now_string)
@@ -29,36 +33,38 @@ async def main(deployment_name, config_yaml):
     await deployment.collect(deployment.server_hosts, "/etc/scylla", trial_dir)
     await deployment.collect(deployment.server_hosts, "/etc/scylla.d", trial_dir)
 
-    await deployment.populate(num_rows=num_rows, replication_factor=replication_factor)
-    await deployment.quiesce()
+    for dataset_type in dataset_size:
+        num_rows = dataset_size[dataset_type]
+        await deployment.populate(num_rows=num_rows, replication_factor=replication_factor)
+        await deployment.quiesce()
 
-    for WRITE_COUNT, READ_COUNT in [(0, 1), (1, 0), (1, 1)]:
-        for rate_fraction in [1.0] + rate_fractions:
-            if rate_fraction == 1.0:
-                rate = f"threads=500"
-            else:
-                rate = f"threads=200 fixed={int(rate_fraction * MAX_RATE / len(deployment.client_hosts))}/s"
+        for WRITE_COUNT, READ_COUNT in [(0, 1), (1, 0), (1, 1)]:
+            for rate_fraction in [1.0] + rate_fractions:
+                if rate_fraction == 1.0:
+                    rate = f"threads=500"
+                else:
+                    rate = f"threads=200 fixed={int(rate_fraction * MAX_RATE / len(deployment.client_hosts))}/s"
 
-            await deployment.cs(
-                op = f"mixed ratio\\(write={WRITE_COUNT},read={READ_COUNT}\\) duration={duration}s cl={cl}",
-                pop = f"dist=UNIFORM(1..{num_rows})",
-                rate = rate,
-                cs = cs,
-            )
+                await deployment.cs(
+                    op = f"mixed ratio\\(write={WRITE_COUNT},read={READ_COUNT}\\) duration={duration}s cl={cl}",
+                    pop = f"dist=UNIFORM(1..{num_rows})",
+                    rate = rate,
+                    cs = cs,
+                )
 
-            stat_dir = os.path.join(trial_dir, f"W{WRITE_COUNT}-R{READ_COUNT}", f"cassandra-stress-{rate_fraction:.2f}")
-            await deployment.collect(deployment.client_hosts, "log.hdr", stat_dir)
-            summary = await process_hdr_file_set(stat_dir, "log", java=java, time_start=warmup_seconds, time_end=duration-cooldown_seconds)
+                stat_dir = os.path.join(trial_dir, f"{dataset_type}-W{WRITE_COUNT}-R{READ_COUNT}", f"cassandra-stress-{rate_fraction:.2f}")
+                await deployment.collect(deployment.client_hosts, "log.hdr", stat_dir)
+                summary = await process_hdr_file_set(stat_dir, "log", java=java, time_start=warmup_seconds, time_end=duration-cooldown_seconds)
 
-            if rate_fraction == 1.0:
-                MAX_RATE = 0
+                if rate_fraction == 1.0:
+                    MAX_RATE = 0
+                    if WRITE_COUNT > 0:
+                        MAX_RATE += summary['WRITE-st'].throughput_per_second
+                    if READ_COUNT > 0:
+                        MAX_RATE += summary['READ-st'].throughput_per_second
+
                 if WRITE_COUNT > 0:
-                    MAX_RATE += summary['WRITE-st'].throughput_per_second
-                if READ_COUNT > 0:
-                    MAX_RATE += summary['READ-st'].throughput_per_second
-
-            if WRITE_COUNT > 0:
-                await deployment.quiesce()
+                    await deployment.quiesce()
 
     await deployment.download_metrics(trial_dir)
 

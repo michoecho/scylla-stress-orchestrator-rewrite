@@ -1,128 +1,78 @@
 import json
 import os
+import sys
 import subprocess
-import inspect
 import shutil
-
-import yaml
 
 def apply(deployment_name, terraform_plan, config):
     config['private_key_location'] = os.path.realpath(config['private_key_location'])
     config['public_key_location'] = os.path.realpath(config['public_key_location'])
+    config['deployment_name'] = deployment_name
+    subprocess.check_call(f"rsync -r --mkpath {terraform_plan}/ {deployment_name}/tf", shell=True)
+    tf_dir = f"{deployment_name}/tf"
 
-    if not os.path.isdir(terraform_plan):
-        print(f"Could not find directory [{terraform_plan}]")
-        exit(1)
+    with open(f'{tf_dir}/tfvars.candidate.json', 'w') as f:
+        json.dump(config, f);
 
-    tf_vars = {f"TF_VAR_{k}":f"{v}" for (k, v) in config.items()}
-
-    call_env = {
+    tf_env = {
         "shell": True,
-        "env": {
-            "TF_WORKSPACE": "default",
-            #"TF_LOG": "trace",
-            **tf_vars,
-        },
-        "cwd": terraform_plan,
+        "cwd": f"{tf_dir}",
     }
-
-    cmd = f'terraform workspace new {deployment_name}'
-    exitcode = subprocess.call(cmd, **call_env)
-    call_env["env"]["TF_WORKSPACE"] = deployment_name;
 
     cmd = f'terraform init'
-    exitcode = subprocess.call(cmd, **call_env)
-    if exitcode != 0:
-        raise Exception(f'Failed terraform init, plan [{terraform_plan}], exitcode={exitcode} command=[{cmd}])')
+    subprocess.check_call(cmd, **tf_env)
 
-    if not os.path.isdir(f"{deployment_name}"):
-        os.makedirs(f"{deployment_name}")
+    cmd = f'terraform apply -var-file tfvars.candidate.json'
+    subprocess.check_call(cmd, **tf_env)    
 
-    with open(f'{deployment_name}/tfvars.candidate.json', 'w') as f:
-        json.dump(config, f);
+    with open(f"{tf_dir}/terraform.tfstate") as f:
+        state = json.load(f)
 
-    cmd = f'terraform apply'
-    exitcode = subprocess.call(cmd, **call_env)    
-    if exitcode != 0:
-        raise Exception(f'Failed terraform apply, plan [{terraform_plan}], exitcode={exitcode} command=[{cmd}])')
-    
-    output_text = subprocess.check_output(f'terraform output -json', **call_env, text=True)
-    output = json.loads(output_text)
+    def debug(text):
+      print(text)
+      return ''
 
-    environment = {}
-    for key, value in output.items():
-        environment[key] = output[key]['value']
+    import jinja2
+    jinja_env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader("templates"),
+        autoescape=jinja2.select_autoescape(),
+        undefined=jinja2.StrictUndefined,
+        trim_blocks=True,
+    )
+    jinja_env.filters['debug']=debug
+    ssh_template = jinja_env.get_template("ssh_config")
+    inventory_template = jinja_env.get_template("inventory")
+
+    instances = {}
+    for resource in state["resources"]:
+        if resource["type"] in ["aws_instance", "aws_spot_instance_request"]:
+            group = resource["name"]
+            instances.setdefault(group, [])
+            for i, instance in enumerate(resource["instances"]):
+                instances[group].append({
+                    "public_ip": instance["attributes"]["public_ip"],
+                    "private_ip": instance["attributes"]["private_ip"],
+                })
 
     with open(f'{deployment_name}/ssh_config', 'w') as ssh_config_file:
-        ssh_config_content = f"""Host *
-    ServerAliveInterval 120
-    StrictHostKeyChecking no
-    IdentityFile {config['private_key_location']}
-    ForwardAgent yes
-    ControlPath ~/.ssh/cm-%r@%h:%p
-    ControlMaster auto
-    ControlPersist 10m
-    ConnectionAttempts 60
-Host server-*
-    User {config["server_user"]}
-Host client-*
-    User {config["client_user"]}
-Host monitoring-*
-    User {config["monitoring_user"]}
-"""
-        for node_type in ["server", "client", "monitoring"]:
-            for i, ip in enumerate(environment[f"{node_type}_public_ips"]):
-                ssh_config_content += f"""
-Host {node_type}-{i}
-    HostName {ip}"""
-        print(ssh_config_content, file=ssh_config_file)
-
-    with open(f'{deployment_name}/tfvars.json', 'w') as f:
-        json.dump(config, f);
-
-    with open(f'{deployment_name}/inventory', 'w') as f:
-        content = f"""[server:vars]
-seed={environment["server_private_ips"][0]}
-"""
-        for node_type in ["server", "client", "monitoring"]:
-            content += f"""[{node_type}]
-"""
-            for i, (public_ip, private_ip) in enumerate(zip(environment[f"{node_type}_public_ips"], environment[f"{node_type}_private_ips"])):
-                content += f"""{node_type}-{i} public_ip={public_ip} private_ip={private_ip}
-"""
-        print(content, file=f)
-
-    try:
-        os.symlink(terraform_plan, f'{deployment_name}/terraform_plan')
-    except FileExistsError:
-        pass
+        ssh_config_file.write(ssh_template.render(instances=instances, var=config))
+    with open(f'{deployment_name}/inventory', 'w') as inventory_file:
+        inventory_file.write(inventory_template.render(instances=instances, var=config, seed=instances["server"][0]["private_ip"]))
+    
+    shutil.move(f"{tf_dir}/tfvars.candidate.json", f"{tf_dir}/tfvars.json")
 
 def destroy(deployment_name):
-    terraform_plan = os.readlink(f'{deployment_name}/terraform_plan')
-
-    if not os.path.isdir(terraform_plan):
-        print(f"Could not find directory [{terraform_plan}]")
-        exit(1)
-
-    call_env = {
+    tf_dir = f"{deployment_name}/tf"
+    tf_env = {
         "shell": True,
-        "env": {
-            "TF_WORKSPACE": deployment_name,
-            #"TF_LOG": "trace",
-        },
-        "cwd": terraform_plan,
+        "cwd": tf_dir,
     }
    
-    varfile = os.path.realpath(f"{deployment_name}/tfvars.json")
+    varfile = os.path.realpath(f"{tf_dir}/tfvars.json")
+    if not os.path.isfile(varfile):
+        varfile = os.path.realpath(f"{tf_dir}/tfvars.candidate.json")
     cmd = f'terraform destroy -var-file {varfile}'
-    exitcode = subprocess.call(cmd, **call_env)
-    if exitcode != 0:
-        raise Exception(f'Failed terraform destroy, plan [{terraform_plan}], exitcode={exitcode} command=[{cmd}])')
+
+    subprocess.check_call(cmd, **tf_env)
 
     shutil.rmtree(f"{deployment_name}")
-
-    call_env["env"]["TF_WORKSPACE"] = "default";
-    cmd = f'terraform workspace delete {deployment_name}'
-    exitcode = subprocess.call(cmd, **call_env)
-    if exitcode != 0:
-        raise Exception(f'Failed terraform workspace, plan [{terraform_plan}], exitcode={exitcode} command=[{cmd}])')

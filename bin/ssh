@@ -6,4 +6,4 @@ if ! test -f "$1/ssh_config"; then
     exit 1
 fi
 
-ssh -C -F "$1/ssh_config" "${@:2}"
+exec ssh -C -F "$1/ssh_config" "${@:2}"

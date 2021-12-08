@@ -1,5 +1,8 @@
 server_count: 3
 server_instance_type: m5d.4xlarge
+server_cpuset: '1-7,9-15'
+server_irq_mask: '0x0101'
+server_num_cpus: 16
 monitoring_instance_type: c5.large
 client_instance_type: c5.4xlarge
 client_count: 3

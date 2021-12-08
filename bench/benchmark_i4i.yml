@@ -1,0 +1,3 @@
+phase_duration: 900
+target_cache_dataset_size_gb: 0.5
+target_disk_dataset_size_gb: 16

@@ -5,15 +5,36 @@
   gather_facts: no
   strategy: free
   tasks:
+    - name: Wait for cloud-init.
+      ansible.builtin.command:
+        cmd: cloud-init status --wait
+    - name: Wait for any possibly running unattended upgrade to finish
+      ansible.builtin.command:
+        cmd: systemd-run --property="After=apt-daily.service apt-daily-upgrade.service" --wait /bin/true
+      become: yes
     - name: Install interactive utilities.
       ansible.builtin.include_tasks: install_utils.yml
-    - name: Wait for AMI setup to succeed (signalled by /etc/scylla/machine_image_configured being created).
-      ansible.builtin.wait_for:
-        path: /etc/scylla/machine_image_configured
-        timeout: 600
+#    - name: Wait for AMI setup to succeed (signalled by /etc/scylla/machine_image_configured being created).
+#      ansible.builtin.wait_for:
+#        path: /etc/scylla/machine_image_configured
+#        timeout: 600
+    - name: Wait for AMI setup to end.
+      ansible.builtin.script:
+        cmd: wait_for_image_setup.sh
+        executable: /bin/bash
     - name: Run scylla_io_setup if /etc/scylla.d/io_properties is absent or incomplete.
       ansible.builtin.shell:
         cmd: grep -q read_iops /etc/scylla.d/io_properties.yaml || scylla_io_setup
+      become: yes
+    - name: Create /etc/scylla/machine_image_configured
+      ansible.builtin.file:
+        path: /etc/scylla/machine_image_configured
+        state: touch
+      become: yes
+    - name: Remove /etc/scylla/ami_disabled
+      ansible.builtin.file:
+        path: /etc/scylla/ami_disabled
+        state: absent
       become: yes
     - name: Fix up cluster name in /etc/scylla/scylla.yaml
       ansible.builtin.lineinfile:
@@ -45,6 +66,12 @@
         path: /etc/scylla/scylla.yaml
         regexp: '^compaction_static_shares:'
         line: 'compaction_static_shares: 100'
+      become: yes
+    - name: Set compaction_enforce_min_threshold in /etc/scylla/scylla.yaml
+      ansible.builtin.lineinfile:
+        path: /etc/scylla/scylla.yaml
+        regexp: '^compaction_enforce_min_threshold:'
+        line: 'compaction_enforce_min_threshold: true'
       become: yes
     - name: Set infinite write timeout in /etc/scylla/scylla.yaml
       ansible.builtin.lineinfile:
@@ -78,13 +105,37 @@
         line: 'skip_wait_for_gossip_to_settle: 0'
       become: yes
       when: private_ip == seed
-    - name: Set short timeout for killing the scylla process.
+    #- name: Set short timeout for killing the scylla process.
+    #  community.general.ini_file:
+    #    path: /usr/lib/systemd/system/scylla-server.service
+    #    option: TimeoutStopSec
+    #    value: "0"
+    #    no_extra_spaces: yes
+    #    section: Service  
+    #  become: yes
+    #- name: Set short timeout for killing the scylla process.
+    #  community.general.ini_file:
+    #    path: /usr/lib/systemd/system/scylla-server.service
+    #    option: KillMode
+    #    value: "control-group"
+    #    no_extra_spaces: yes
+    #    section: Service  
+    #  become: yes
+    - name: Disable automatic scylla service restart (for easier killing).
       community.general.ini_file:
         path: /usr/lib/systemd/system/scylla-server.service
-        option: TimeoutStopSec
-        value: "0"
+        option: Restart
+        value: "no"
         no_extra_spaces: yes
         section: Service  
+      become: yes
+    - name: Allow perf usage for non-root.
+      ansible.posix.sysctl:
+        name: kernel.perf_event_paranoid
+        value: '-1'
+        state: present
+        sysctl_set: yes
+        reload: yes
       become: yes
     - name: Reload the Scylla systemd unit.
       ansible.builtin.systemd:

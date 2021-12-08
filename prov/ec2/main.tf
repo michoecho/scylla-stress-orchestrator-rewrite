@@ -1,5 +1,4 @@
 variable "public_key_location" {}
-variable "private_key_location" {}
 variable "owner" {}
 variable "access_key" {}
 variable "secret_key" {}
@@ -17,9 +16,10 @@ variable "client_instance_type" {}
 variable "client_count" { type = number }
 variable "client_user" {}
 variable "client_ami" {}
+variable "deployment_name" {}
 
 locals {
-  deployment_name = terraform.workspace
+  deployment_name       = var.deployment_name
 
   region                = var.region
   availability_zone     = var.availability_zone
@@ -186,7 +186,7 @@ resource "aws_instance" "server" {
 
   # Terraform reprovisions the scylla node even when its configuration hasn't changed. This workaround prevents that.
   lifecycle {
-      ignore_changes = ["ebs_block_device"]
+      ignore_changes = [ebs_block_device]
   }
 
   user_data = jsonencode({
@@ -272,7 +272,7 @@ resource "aws_instance" "monitoring" {
   ]
 
   lifecycle {
-      ignore_changes = ["ebs_block_device"]
+      ignore_changes = [ebs_block_device]
   }
 
   ebs_block_device {

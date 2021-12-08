@@ -1,0 +1,8 @@
+server_count: 3
+server_instance_type: i3.16xlarge
+server_num_cpus: 64
+server_irq_mask: '0x00000003,0x00000003'
+server_cpuset: '2-31,34-63'
+monitoring_instance_type: c5.4xlarge
+client_instance_type: c5.9xlarge
+client_count: 8

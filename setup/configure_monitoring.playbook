@@ -8,6 +8,13 @@
     - dc: dc1
     - version: 3.8.3
   tasks:
+    - name: Wait for cloud-init.
+      ansible.builtin.command:
+        cmd: cloud-init status --wait
+    - name: Wait for any possibly running unattended upgrade to finish
+      ansible.builtin.command:
+        cmd: systemd-run --property="After=apt-daily.service apt-daily-upgrade.service" --wait /bin/true
+      become: yes
     - name: Get the remote user name.
       ansible.builtin.setup:
         filter: 'ansible_env'
@@ -16,9 +23,6 @@
     - name: Form a list of private ips for prometheus config files.
       set_fact:
         server_private_ips: "{{groups['server'] | map('extract', hostvars) | map(attribute='private_ip') | list}}"
-    - name: Wait for cloud-init.
-      ansible.builtin.command:
-        cmd: cloud-init status --wait
     - name: Install docker.
       ansible.builtin.apt:
         name: docker.io
